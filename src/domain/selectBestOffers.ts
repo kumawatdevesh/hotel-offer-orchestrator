@@ -27,15 +27,15 @@ export function selectBestOffers(results: SupplierResult[]): HotelOffer[] {
   const best = new Map<string, HotelOffer>();
 
   for (const { supplier, hotels } of results) {
-    for (const hotel of hotels) {
+    for (const { name, city, price, commissionPct } of hotels) {
       const offer: HotelOffer = {
-        name: hotel.name.trim().replace(/\s+/g, ' '),
-        city: hotel.city,
-        price: money(hotel.price),
-        commissionPct: hotel.commissionPct,
+        name: name.trim().replace(/\s+/g, ' '),
+        city,
+        price: money(price),
+        commissionPct,
         supplier,
       };
-      const key = hotelKey(hotel.name);
+      const key = hotelKey(name);
       const current = best.get(key);
       if (!current || isBetter(offer, current)) best.set(key, offer);
     }
