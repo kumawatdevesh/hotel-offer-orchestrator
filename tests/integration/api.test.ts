@@ -1,11 +1,11 @@
 import Redis from 'ioredis';
 import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createApp } from '../../src/api/app';
+import { createApp } from '../../src/app';
 import { createHotelCache, type HotelCache } from '../../src/cache/hotelCache';
 import type { HotelOffer } from '../../src/domain/types';
-import { OrchestrationError, type OfferOrchestrator } from '../../src/temporal/client';
-import type { HotelOffersResult } from '../../src/temporal/shared';
+import { OrchestrationError, type OfferOrchestrator } from '../../src/orchestration/client';
+import type { HotelOffersResult } from '../../src/orchestration/shared';
 
 // Real Redis, fake orchestrator: the workflow has its own tests; here we test the HTTP decisions.
 const redis = new Redis(process.env.TEST_REDIS_URL ?? 'redis://localhost:6379/15');

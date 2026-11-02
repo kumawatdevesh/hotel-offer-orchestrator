@@ -7,9 +7,9 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "dev:api": "tsx watch src/server.ts",
-    "dev:worker": "tsx watch src/temporal/worker.ts",
+    "dev:worker": "tsx watch src/worker.ts",
     "start:api": "node dist/server.js",
-    "start:worker": "node dist/temporal/worker.js",
+    "start:worker": "node dist/worker.js",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.tests.json",
     "test": "vitest run",
     "test:unit": "vitest run tests/unit",

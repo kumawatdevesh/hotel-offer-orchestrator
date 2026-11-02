@@ -1,5 +1,5 @@
 import Redis from 'ioredis';
-import { logger } from '../logger';
+import { logger } from '../config/logger';
 
 /**
  * One shared connection per process. Commands fail fast while Redis is down

@@ -4,8 +4,8 @@ import { TestWorkflowEnvironment } from '@temporalio/testing';
 import { bundleWorkflowCode, DefaultLogger, Runtime, Worker } from '@temporalio/worker';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { HotelOffer, SupplierHotel, SupplierName } from '../../src/domain/types';
-import type { Activities } from '../../src/temporal/activities';
-import { createOfferOrchestrator, OrchestrationError } from '../../src/temporal/client';
+import type { Activities } from '../../src/orchestration/activities';
+import { createOfferOrchestrator, OrchestrationError } from '../../src/orchestration/client';
 
 // Real Temporal dev server + the real workflow code; only the activities are fakes.
 let env: TestWorkflowEnvironment;
@@ -16,7 +16,7 @@ beforeAll(async () => {
   Runtime.install({ logger: new DefaultLogger('ERROR') });
   env = await TestWorkflowEnvironment.createLocal();
   workflowBundle = await bundleWorkflowCode({
-    workflowsPath: path.resolve(__dirname, '../../src/temporal/workflows.ts'),
+    workflowsPath: path.resolve(__dirname, '../../src/orchestration/workflows.ts'),
     logger: new DefaultLogger('ERROR'),
   });
 }, 120_000);

@@ -1,7 +1,7 @@
 import { z } from 'zod';
-import { config } from '../config';
+import { config } from '../config/env';
 import type { SupplierHotel, SupplierName } from '../domain/types';
-import { logger } from '../logger';
+import { logger } from '../config/logger';
 
 export type SupplierFailureReason = 'timeout' | 'network' | 'http' | 'invalid_response';
 

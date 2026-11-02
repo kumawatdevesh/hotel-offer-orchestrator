@@ -1,11 +1,11 @@
 import { once } from 'node:events';
 import { Client, Connection } from '@temporalio/client';
-import { createApp } from './api/app';
+import { createApp } from './app';
 import { createHotelCache } from './cache/hotelCache';
 import { createRedis } from './cache/redis';
-import { config } from './config';
-import { logger } from './logger';
-import { createOfferOrchestrator } from './temporal/client';
+import { config } from './config/env';
+import { logger } from './config/logger';
+import { createOfferOrchestrator } from './orchestration/client';
 
 const SHUTDOWN_GRACE_MS = 10_000;
 

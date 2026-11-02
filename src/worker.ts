@@ -1,9 +1,9 @@
 import { NativeConnection, Worker } from '@temporalio/worker';
-import { createHotelCache } from '../cache/hotelCache';
-import { createRedis } from '../cache/redis';
-import { config } from '../config';
-import { logger } from '../logger';
-import { createActivities } from './activities';
+import { createHotelCache } from './cache/hotelCache';
+import { createRedis } from './cache/redis';
+import { config } from './config/env';
+import { logger } from './config/logger';
+import { createActivities } from './orchestration/activities';
 
 async function main(): Promise<void> {
   const redis = createRedis(config.REDIS_URL);
@@ -18,7 +18,7 @@ async function main(): Promise<void> {
       connection,
       namespace: config.TEMPORAL_NAMESPACE,
       taskQueue: config.TEMPORAL_TASK_QUEUE,
-      workflowsPath: require.resolve('./workflows'),
+      workflowsPath: require.resolve('./orchestration/workflows'),
       activities: createActivities(cache),
     });
     logger.info({ taskQueue: config.TEMPORAL_TASK_QUEUE }, 'worker started');

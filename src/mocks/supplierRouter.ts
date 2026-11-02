@@ -1,7 +1,7 @@
 import express, { Router } from 'express';
 import { z } from 'zod';
 import { SUPPLIERS, type SupplierName } from '../domain/types';
-import { MALFORMED_ROWS, MOCK_INVENTORY } from './mockData';
+import { MALFORMED_ROWS, MOCK_INVENTORY } from './supplierData';
 
 export const CHAOS_MODES = ['ok', 'fail', 'slow', 'bad-data'] as const;
 export type ChaosMode = (typeof CHAOS_MODES)[number];

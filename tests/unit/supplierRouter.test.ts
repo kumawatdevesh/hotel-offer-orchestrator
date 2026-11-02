@@ -1,7 +1,7 @@
 import express from 'express';
 import request from 'supertest';
 import { describe, expect, it } from 'vitest';
-import { createMockSupplierRouter } from '../../src/suppliers/mockRouter';
+import { createMockSupplierRouter } from '../../src/mocks/supplierRouter';
 
 function app(allowChaos = true) {
   return express().use(createMockSupplierRouter({ allowChaos, slowMs: 50 }));

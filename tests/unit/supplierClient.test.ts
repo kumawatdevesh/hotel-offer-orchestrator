@@ -3,7 +3,7 @@ import type { Server } from 'node:http';
 import express from 'express';
 import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { createMockSupplierRouter } from '../../src/suppliers/mockRouter';
+import { createMockSupplierRouter } from '../../src/mocks/supplierRouter';
 import { fetchSupplierHotels, SupplierError } from '../../src/suppliers/supplierClient';
 
 // A real HTTP server, so timeouts and status codes go through actual fetch.
