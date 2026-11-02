@@ -24,14 +24,9 @@ export interface OrchestratorOptions {
   timeoutMs: number;
 }
 
-export function createOfferOrchestrator({
-  client,
-  taskQueue,
-  supplierTimeoutMs,
-  timeoutMs,
-}: OrchestratorOptions) {
+export function createOfferOrchestrator(options: OrchestratorOptions) {
   // Single flight inside this process: concurrent requests for one city share one Temporal call.
-  // Temporal's workflow-id policy below does the same across processes.
+  // Temporal's workflow-id policy (see startAndWait) does the same across processes.
   const inFlight = new Map<string, Promise<HotelOffersResult>>();
 
   return {
@@ -40,46 +35,62 @@ export function createOfferOrchestrator({
       const existing = inFlight.get(key);
       if (existing) return existing;
 
-      const call = fetchOnce(key, requestId).finally(() => inFlight.delete(key));
+      const call = fetchOnce(options, key, requestId).finally(() => inFlight.delete(key));
       inFlight.set(key, call);
       return call;
     },
   };
+}
 
-  async function fetchOnce(key: string, requestId?: string): Promise<HotelOffersResult> {
-    const run = (async () => {
-      const handle = await client.workflow.start('getHotelOffersWorkflow', {
-        taskQueue,
-        args: [{ city: key, supplierTimeoutMs }],
-        // One run per city at a time: concurrent requests for "delhi" join the running workflow
-        // instead of each hitting the suppliers.
-        workflowId: `hotels-${key}`,
-        workflowIdConflictPolicy: 'USE_EXISTING',
-        workflowIdReusePolicy: 'ALLOW_DUPLICATE',
-        workflowExecutionTimeout: timeoutMs,
-        // Visible in the Temporal UI, so a slow request can be traced to its workflow run.
-        ...(requestId && { memo: { requestId } }),
-      });
-      return (await handle.result()) as HotelOffersResult;
-    })();
+/** One Temporal round trip for a city, bounded by the caller's timeout, with errors mapped. */
+async function fetchOnce(
+  options: OrchestratorOptions,
+  key: string,
+  requestId?: string,
+): Promise<HotelOffersResult> {
+  try {
+    return await withTimeout(startAndWait(options, key, requestId), options.timeoutMs, key);
+  } catch (err) {
+    throw toOrchestrationError(err);
+  }
+}
 
-    let timer: NodeJS.Timeout | undefined;
-    const timeout = new Promise<never>((_, reject) => {
-      timer = setTimeout(
-        () => reject(new OrchestrationError('TIMEOUT', `no result for ${key} in ${timeoutMs}ms`)),
-        timeoutMs,
-      );
-    });
+async function startAndWait(
+  { client, taskQueue, supplierTimeoutMs, timeoutMs }: OrchestratorOptions,
+  key: string,
+  requestId?: string,
+): Promise<HotelOffersResult> {
+  const handle = await client.workflow.start('getHotelOffersWorkflow', {
+    taskQueue,
+    args: [{ city: key, supplierTimeoutMs }],
+    // One run per city at a time: concurrent requests for "delhi" join the running workflow
+    // instead of each hitting the suppliers.
+    workflowId: `hotels-${key}`,
+    workflowIdConflictPolicy: 'USE_EXISTING',
+    workflowIdReusePolicy: 'ALLOW_DUPLICATE',
+    workflowExecutionTimeout: timeoutMs,
+    // Visible in the Temporal UI, so a slow request can be traced to its workflow run.
+    ...(requestId && { memo: { requestId } }),
+  });
+  return (await handle.result()) as HotelOffersResult;
+}
 
-    try {
-      return await Promise.race([run, timeout]);
-    } catch (err) {
-      throw toOrchestrationError(err);
-    } finally {
-      clearTimeout(timer);
-      // The losing promise may still reject later; it must not surface as unhandled.
-      run.catch(() => undefined);
-    }
+/** Rejects with TIMEOUT if `work` has not settled within `ms`, even when Temporal itself hangs. */
+async function withTimeout<T>(work: Promise<T>, ms: number, key: string): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () => reject(new OrchestrationError('TIMEOUT', `no result for ${key} in ${ms}ms`)),
+      ms,
+    );
+  });
+
+  try {
+    return await Promise.race([work, timeout]);
+  } finally {
+    clearTimeout(timer);
+    // The losing promise may still reject later; it must not surface as unhandled.
+    work.catch(() => undefined);
   }
 }
 

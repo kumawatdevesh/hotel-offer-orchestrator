@@ -44,19 +44,9 @@ export function createHotelOfferService({ cache, orchestrator }: HotelOfferServi
     async getOffers({ city, range, requestId, log }: GetOffersInput): Promise<HotelOffersAnswer> {
       const isFilter = range.min !== undefined || range.max !== undefined;
 
-      // Redis being down must not take the endpoint down: treat it as a miss and carry on.
-      const readCache = async (): Promise<CachedHotels | null> => {
-        try {
-          return await cache.getByPriceRange(city, range);
-        } catch (err) {
-          log.warn({ err, city }, 'cache read failed; continuing without cache');
-          return null;
-        }
-      };
-
       let cached: CachedHotels | null = null;
       if (isFilter) {
-        cached = await readCache();
+        cached = await readCacheSafely(cache, city, range, log);
         if (cached?.isFresh) return { ...cached, cache: 'HIT' };
       }
 
@@ -73,13 +63,28 @@ export function createHotelOfferService({ cache, orchestrator }: HotelOfferServi
         log.warn({ code: err.code, city, reason: err.message }, 'fresh fetch failed');
       }
 
-      const stale = cached ?? (await readCache());
+      const stale = cached ?? (await readCacheSafely(cache, city, range, log));
       // Every supplier is effectively missing from a stale answer, whatever the cache recorded.
       if (stale) return { ...stale, cache: 'STALE', degraded: [...SUPPLIERS] };
 
       throw new OffersUnavailableError(city);
     },
   };
+}
+
+/** Redis being down must not take the endpoint down: a failed read counts as a miss. */
+async function readCacheSafely(
+  cache: HotelCache,
+  city: string,
+  range: PriceRange,
+  log: Logger,
+): Promise<CachedHotels | null> {
+  try {
+    return await cache.getByPriceRange(city, range);
+  } catch (err) {
+    log.warn({ err, city }, 'cache read failed; continuing without cache');
+    return null;
+  }
 }
 
 function inRange(value: number, { min, max }: PriceRange): boolean {

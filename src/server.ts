@@ -1,5 +1,7 @@
 import { once } from 'node:events';
+import type { Server } from 'node:http';
 import { Client, Connection } from '@temporalio/client';
+import type Redis from 'ioredis';
 import { createApp } from './app';
 import { createHotelCache } from './cache/hotelCache';
 import { createRedis } from './cache/redis';
@@ -42,26 +44,35 @@ async function main(): Promise<void> {
     process.exit(1);
   });
 
-  let stopping = false;
-  const shutdown = (signal: string) => {
-    if (stopping) return;
-    stopping = true;
-    logger.info({ signal }, 'shutting down');
-    setTimeout(() => {
-      logger.error('graceful shutdown timed out; forcing exit');
-      process.exit(1);
-    }, SHUTDOWN_GRACE_MS).unref();
+  const resources: Resources = { server, redis, connection };
+  process.on('SIGTERM', () => shutdown('SIGTERM', resources));
+  process.on('SIGINT', () => shutdown('SIGINT', resources));
+}
 
-    // Stop accepting connections, let in-flight requests finish, then release clients.
-    server.close(async () => {
-      await Promise.allSettled([redis.quit(), connection.close()]);
-      logger.info('shutdown complete');
-      process.exit(0);
-    });
-    server.closeIdleConnections();
-  };
-  process.on('SIGTERM', () => shutdown('SIGTERM'));
-  process.on('SIGINT', () => shutdown('SIGINT'));
+interface Resources {
+  server: Server;
+  redis: Redis;
+  connection: Connection;
+}
+
+let stopping = false;
+
+/** Stop accepting connections, let in-flight requests finish, then release clients. */
+function shutdown(signal: string, { server, redis, connection }: Resources): void {
+  if (stopping) return;
+  stopping = true;
+  logger.info({ signal }, 'shutting down');
+  setTimeout(() => {
+    logger.error('graceful shutdown timed out; forcing exit');
+    process.exit(1);
+  }, SHUTDOWN_GRACE_MS).unref();
+
+  server.close(async () => {
+    await Promise.allSettled([redis.quit(), connection.close()]);
+    logger.info('shutdown complete');
+    process.exit(0);
+  });
+  server.closeIdleConnections();
 }
 
 main().catch((err) => {
