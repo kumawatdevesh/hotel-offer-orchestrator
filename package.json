@@ -25,6 +25,7 @@
   "dependencies": {
     "dotenv": "^18.0.9",
     "express": "^4.22.3",
+    "ioredis": "^6.0.0",
     "pino": "^10.4.0",
     "zod": "^3.25.76"
   },
