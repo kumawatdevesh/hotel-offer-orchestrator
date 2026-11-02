@@ -109,6 +109,15 @@ describe('hotelCache', () => {
     expect((await cache.getByPriceRange('delhi'))?.offers).toHaveLength(5);
   });
 
+  it.each(['prices', 'offers'] as const)(
+    'reports a miss when eviction removed only the %s key',
+    async (evicted) => {
+      await cache.save('delhi', DELHI, []);
+      await redis.del(cacheKeys('delhi')[evicted]);
+      expect(await cache.getByPriceRange('delhi')).toBeNull();
+    },
+  );
+
   it('handles more hotels than one Lua unpack chunk', async () => {
     const many = Array.from({ length: 1_200 }, (_, i) => offer(`Hotel ${i}`, 1_000 + i));
     await cache.save('delhi', many, []);

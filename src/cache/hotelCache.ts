@@ -17,10 +17,15 @@ declare module 'ioredis' {
 
 // Reads the ZSET range and the matching HASH fields in one atomic step, so a concurrent
 // save can never leave us with a name whose offer is already gone.
+// Under memory pressure Redis evicts keys one at a time, so a city can lose its ZSET or HASH
+// while meta survives; that half-entry is reported as a miss, not as "no hotels".
 // HMGET runs in chunks because Lua's unpack() has a stack limit (~8k values).
 const HOTELS_BY_PRICE_LUA = `
 local meta = redis.call('GET', KEYS[3])
 if not meta then return nil end
+if cjson.decode(meta).count > 0 and redis.call('EXISTS', KEYS[1], KEYS[2]) < 2 then
+  return nil
+end
 local names = redis.call('ZRANGEBYSCORE', KEYS[1], ARGV[1], ARGV[2])
 local out = { meta }
 for i = 1, #names, 500 do
@@ -35,6 +40,8 @@ return out
 
 interface CacheMeta {
   fetchedAt: number;
+  /** Offers written with this meta; 0 means the city legitimately has no ZSET/HASH. */
+  count: number;
   degraded: SupplierName[];
 }
 
@@ -78,7 +85,7 @@ export function createHotelCache(
     /** Replaces the city's list atomically: readers see the old list or the new one, never a mix. */
     async save(city: string, offers: HotelOffer[], degraded: SupplierName[]): Promise<void> {
       const keys = cacheKeys(city);
-      const meta: CacheMeta = { fetchedAt: now(), degraded };
+      const meta: CacheMeta = { fetchedAt: now(), count: offers.length, degraded };
       const tx = redis.multi().del(keys.prices, keys.offers);
 
       if (offers.length > 0) {
