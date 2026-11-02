@@ -36,6 +36,11 @@ const INVENTORY: Record<SupplierName, SupplierHotel[]> = {
   ],
 };
 
+const slowly: FetchImpl = async (s) => {
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  return INVENTORY[s];
+};
+
 type FetchImpl = (supplier: SupplierName, city: string) => Promise<SupplierHotel[]>;
 
 function fakeActivities(fetch: FetchImpl = async (s) => INVENTORY[s]) {
@@ -46,9 +51,11 @@ function fakeActivities(fetch: FetchImpl = async (s) => INVENTORY[s]) {
 }
 
 /** Runs `body` while a worker with the given activities polls a fresh task queue. */
+type Orchestrator = ReturnType<typeof createOfferOrchestrator>;
+
 async function withWorker<T>(
   activities: ReturnType<typeof fakeActivities>,
-  body: (orchestrator: ReturnType<typeof createOfferOrchestrator>) => Promise<T>,
+  body: (orchestrator: Orchestrator, newOrchestrator: () => Orchestrator) => Promise<T>,
   timeoutMs = 10_000,
 ): Promise<T> {
   const taskQueue = `test-${++queueCounter}`;
@@ -58,13 +65,10 @@ async function withWorker<T>(
     workflowBundle,
     activities,
   });
-  const orchestrator = createOfferOrchestrator({
-    client: env.client,
-    taskQueue,
-    supplierTimeoutMs: 200,
-    timeoutMs,
-  });
-  return worker.runUntil(body(orchestrator));
+  // Each orchestrator stands in for a separate API process with its own in-flight map.
+  const newOrchestrator = () =>
+    createOfferOrchestrator({ client: env.client, taskQueue, supplierTimeoutMs: 200, timeoutMs });
+  return worker.runUntil(body(newOrchestrator(), newOrchestrator));
 }
 
 const callsFor = (activities: ReturnType<typeof fakeActivities>, supplier: SupplierName) =>
@@ -135,18 +139,38 @@ describe('getHotelOffersWorkflow', () => {
     expect(result.cached).toBe(false);
   });
 
-  it('runs one workflow for concurrent requests on the same city', async () => {
-    const activities = fakeActivities(async (s) => {
-      await new Promise((resolve) => setTimeout(resolve, 300));
-      return INVENTORY[s];
-    });
-    const results = await withWorker(activities, (o) =>
-      Promise.all(Array.from({ length: 5 }, () => o.fetchOffers('delhi'))),
+  it('makes one Temporal call for concurrent requests in the same API process', async () => {
+    const activities = fakeActivities(slowly);
+    const start = vi.spyOn(env.client.workflow, 'start');
+    try {
+      const results = await withWorker(activities, (o) =>
+        Promise.all(Array.from({ length: 5 }, () => o.fetchOffers('delhi'))),
+      );
+      expect(results).toHaveLength(5);
+      expect(start).toHaveBeenCalledTimes(1);
+      expect(activities.fetchSupplier).toHaveBeenCalledTimes(2); // once per supplier, not 10
+    } finally {
+      start.mockRestore();
+    }
+  });
+
+  it('runs one workflow for concurrent requests from different API processes', async () => {
+    const activities = fakeActivities(slowly);
+    const results = await withWorker(activities, (_o, newOrchestrator) =>
+      Promise.all(Array.from({ length: 5 }, () => newOrchestrator().fetchOffers('delhi'))),
     );
 
-    expect(results).toHaveLength(5);
     expect(new Set(results.map((r) => r.fetchedAt)).size).toBe(1);
-    expect(activities.fetchSupplier).toHaveBeenCalledTimes(2); // once per supplier, not 10
+    expect(activities.fetchSupplier).toHaveBeenCalledTimes(2);
+  });
+
+  it('starts a new run once the previous one has finished', async () => {
+    const activities = fakeActivities();
+    await withWorker(activities, async (o) => {
+      await o.fetchOffers('delhi');
+      await o.fetchOffers('delhi');
+    });
+    expect(activities.fetchSupplier).toHaveBeenCalledTimes(4);
   });
 });
 

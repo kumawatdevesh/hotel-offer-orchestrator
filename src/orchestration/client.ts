@@ -30,45 +30,57 @@ export function createOfferOrchestrator({
   supplierTimeoutMs,
   timeoutMs,
 }: OrchestratorOptions) {
+  // Single flight inside this process: concurrent requests for one city share one Temporal call.
+  // Temporal's workflow-id policy below does the same across processes.
+  const inFlight = new Map<string, Promise<HotelOffersResult>>();
+
   return {
-    async fetchOffers(city: string, requestId?: string): Promise<HotelOffersResult> {
+    fetchOffers(city: string, requestId?: string): Promise<HotelOffersResult> {
       const key = hotelKey(city);
+      const existing = inFlight.get(key);
+      if (existing) return existing;
 
-      const run = (async () => {
-        const handle = await client.workflow.start('getHotelOffersWorkflow', {
-          taskQueue,
-          args: [{ city: key, supplierTimeoutMs }],
-          // One run per city at a time: concurrent requests for "delhi" join the running workflow
-          // instead of each hitting the suppliers.
-          workflowId: `hotels-${key}`,
-          workflowIdConflictPolicy: 'USE_EXISTING',
-          workflowIdReusePolicy: 'ALLOW_DUPLICATE',
-          workflowExecutionTimeout: timeoutMs,
-          // Visible in the Temporal UI, so a slow request can be traced to its workflow run.
-          ...(requestId && { memo: { requestId } }),
-        });
-        return (await handle.result()) as HotelOffersResult;
-      })();
-
-      let timer: NodeJS.Timeout | undefined;
-      const timeout = new Promise<never>((_, reject) => {
-        timer = setTimeout(
-          () => reject(new OrchestrationError('TIMEOUT', `no result for ${key} in ${timeoutMs}ms`)),
-          timeoutMs,
-        );
-      });
-
-      try {
-        return await Promise.race([run, timeout]);
-      } catch (err) {
-        throw toOrchestrationError(err);
-      } finally {
-        clearTimeout(timer);
-        // The losing promise may still reject later; it must not surface as unhandled.
-        run.catch(() => undefined);
-      }
+      const call = fetchOnce(key, requestId).finally(() => inFlight.delete(key));
+      inFlight.set(key, call);
+      return call;
     },
   };
+
+  async function fetchOnce(key: string, requestId?: string): Promise<HotelOffersResult> {
+    const run = (async () => {
+      const handle = await client.workflow.start('getHotelOffersWorkflow', {
+        taskQueue,
+        args: [{ city: key, supplierTimeoutMs }],
+        // One run per city at a time: concurrent requests for "delhi" join the running workflow
+        // instead of each hitting the suppliers.
+        workflowId: `hotels-${key}`,
+        workflowIdConflictPolicy: 'USE_EXISTING',
+        workflowIdReusePolicy: 'ALLOW_DUPLICATE',
+        workflowExecutionTimeout: timeoutMs,
+        // Visible in the Temporal UI, so a slow request can be traced to its workflow run.
+        ...(requestId && { memo: { requestId } }),
+      });
+      return (await handle.result()) as HotelOffersResult;
+    })();
+
+    let timer: NodeJS.Timeout | undefined;
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(
+        () => reject(new OrchestrationError('TIMEOUT', `no result for ${key} in ${timeoutMs}ms`)),
+        timeoutMs,
+      );
+    });
+
+    try {
+      return await Promise.race([run, timeout]);
+    } catch (err) {
+      throw toOrchestrationError(err);
+    } finally {
+      clearTimeout(timer);
+      // The losing promise may still reject later; it must not surface as unhandled.
+      run.catch(() => undefined);
+    }
+  }
 }
 
 function toOrchestrationError(err: unknown): OrchestrationError {

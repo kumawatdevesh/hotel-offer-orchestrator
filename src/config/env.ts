@@ -28,10 +28,22 @@ const schema = z
     CACHE_FRESH_TTL_SECONDS: positiveInt.default(600),
     // Redis drops the keys after this, so stale fallback data has a hard limit.
     CACHE_HARD_TTL_SECONDS: positiveInt.default(86_400),
+
+    // Consecutive failures that open a supplier's circuit (stop calling it for a while).
+    CIRCUIT_FAILURE_THRESHOLD: positiveInt.default(5),
+    // How long an open circuit skips the supplier before letting a trial call through.
+    CIRCUIT_OPEN_SECONDS: positiveInt.default(30),
+    // The failure count resets after this long with no new failure.
+    CIRCUIT_RESET_WINDOW_SECONDS: positiveInt.default(60),
   })
   .refine((c) => c.CACHE_HARD_TTL_SECONDS >= c.CACHE_FRESH_TTL_SECONDS, {
     message: 'CACHE_HARD_TTL_SECONDS must be >= CACHE_FRESH_TTL_SECONDS',
     path: ['CACHE_HARD_TTL_SECONDS'],
+  })
+  // The count must outlive the open period, so one failed trial call re-opens the circuit at once.
+  .refine((c) => c.CIRCUIT_RESET_WINDOW_SECONDS > c.CIRCUIT_OPEN_SECONDS, {
+    message: 'CIRCUIT_RESET_WINDOW_SECONDS must be > CIRCUIT_OPEN_SECONDS',
+    path: ['CIRCUIT_RESET_WINDOW_SECONDS'],
   });
 
 export type Config = z.infer<typeof schema>;
