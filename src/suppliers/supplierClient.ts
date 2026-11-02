@@ -52,11 +52,13 @@ export async function fetchSupplierHotels(
     response = await fetch(url, { signal: AbortSignal.timeout(timeoutMs) });
   } catch (err) {
     if (err instanceof DOMException && err.name === 'TimeoutError') {
+      // Not retried: a supplier that just used the whole budget will likely do it again,
+      // and a retry would double the user's wait. Fast failures below do get a retry.
       throw new SupplierError(
         supplier,
         'timeout',
         `${supplier} timed out after ${timeoutMs}ms`,
-        true,
+        false,
       );
     }
     throw new SupplierError(supplier, 'network', `${supplier} unreachable: ${String(err)}`, true);

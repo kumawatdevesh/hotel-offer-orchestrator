@@ -31,7 +31,7 @@ export function createOfferOrchestrator({
   timeoutMs,
 }: OrchestratorOptions) {
   return {
-    async fetchOffers(city: string): Promise<HotelOffersResult> {
+    async fetchOffers(city: string, requestId?: string): Promise<HotelOffersResult> {
       const key = hotelKey(city);
 
       const run = (async () => {
@@ -44,6 +44,8 @@ export function createOfferOrchestrator({
           workflowIdConflictPolicy: 'USE_EXISTING',
           workflowIdReusePolicy: 'ALLOW_DUPLICATE',
           workflowExecutionTimeout: timeoutMs,
+          // Visible in the Temporal UI, so a slow request can be traced to its workflow run.
+          ...(requestId && { memo: { requestId } }),
         });
         return (await handle.result()) as HotelOffersResult;
       })();

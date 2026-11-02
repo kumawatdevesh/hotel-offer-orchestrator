@@ -65,7 +65,7 @@ describe('fetchSupplierHotels', () => {
     const err = await failureOf(
       fetchSupplierHotels('supplierB', 'delhi', { baseUrl: `${base}/supplierB`, timeoutMs: 100 }),
     );
-    expect(err).toMatchObject({ supplier: 'supplierB', reason: 'timeout', retryable: true });
+    expect(err).toMatchObject({ supplier: 'supplierB', reason: 'timeout', retryable: false });
   });
 
   it('reports a 500 as a retryable http failure', async () => {
