@@ -1,0 +1,326 @@
+openapi: 3.0.3
+info:
+  title: Hotel Offer Orchestrator
+  version: 1.0.0
+  description: |
+    Asks two hotel suppliers for offers in a city, keeps the cheapest offer per hotel
+    (higher commission wins a price tie), caches the result in Redis and keeps answering
+    when a supplier is slow or down.
+
+    **Try it:** start the stack (`docker compose up --build`), then use "Try it out" below.
+    Break a supplier with the **Mock suppliers** endpoints to see degraded mode.
+
+servers:
+  - url: /
+    description: This API
+
+tags:
+  - name: Hotels
+  - name: Health
+  - name: Mock suppliers
+    description: |
+      Stand-ins for the two external suppliers. With Docker they run in their own
+      container on port 4000; without Docker the API serves them itself.
+
+paths:
+  /api/hotels:
+    get:
+      tags: [Hotels]
+      summary: Best offer per hotel in a city
+      description: |
+        - **Without a price filter:** always asks both suppliers (through a Temporal workflow),
+          merges, saves to Redis and returns the result.
+        - **With `minPrice` and/or `maxPrice`:** answered from Redis when the city was fetched less
+          than 10 minutes ago; otherwise fetches first, then filters.
+        - If the suppliers can't be reached, returns the last cached copy (up to 24 h old) marked
+          `x-cache: STALE`. Only when nothing is cached does it return 503.
+      parameters:
+        - name: city
+          in: query
+          required: true
+          description: Case-insensitive. Cities with data in the mocks are delhi, mumbai, bangalore.
+          schema: { type: string, minLength: 1, maxLength: 100 }
+          example: delhi
+        - name: minPrice
+          in: query
+          description: Inclusive lower bound. Empty means not given.
+          schema: { type: number, minimum: 0 }
+          example: 5000
+        - name: maxPrice
+          in: query
+          description: Inclusive upper bound. Must be >= minPrice.
+          schema: { type: number, minimum: 0 }
+          example: 6500
+      responses:
+        '200':
+          description: Offers, cheapest first. An unknown city returns an empty list.
+          headers:
+            x-cache: { $ref: '#/components/headers/XCache' }
+            x-data-fetched-at: { $ref: '#/components/headers/XDataFetchedAt' }
+            x-degraded-suppliers: { $ref: '#/components/headers/XDegradedSuppliers' }
+            x-request-id: { $ref: '#/components/headers/XRequestId' }
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/HotelOffer' }
+              example:
+                - { name: holtin, city: delhi, price: 5340, commissionPct: 20, supplier: supplierB }
+                - { name: Radison, city: delhi, price: 5900, commissionPct: 15, supplier: supplierB }
+        '400':
+          description: Invalid query (missing city, non-numeric or negative price, minPrice > maxPrice).
+          headers:
+            x-request-id: { $ref: '#/components/headers/XRequestId' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example:
+                error: { code: INVALID_QUERY, message: 'minPrice: minPrice must be <= maxPrice' }
+        '503':
+          description: No supplier answered and nothing is cached for this city.
+          headers:
+            x-degraded-suppliers: { $ref: '#/components/headers/XDegradedSuppliers' }
+            x-request-id: { $ref: '#/components/headers/XRequestId' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example:
+                error:
+                  code: ALL_SUPPLIERS_UNAVAILABLE
+                  message: no supplier responded and no cached data exists for chennai
+        '500': { $ref: '#/components/responses/Internal' }
+
+  /health:
+    get:
+      tags: [Health]
+      summary: Status of every dependency
+      description: |
+        - `ok`: everything up.
+        - `degraded` (200): still serving, something is missing: a supplier down, a circuit open, or Redis down.
+        - `down` (503): no fresh data possible: Temporal down, no worker polling, or no usable supplier.
+
+        Each probe stops after 1 s; the report is reused for 5 s.
+      responses:
+        '200':
+          description: ok or degraded
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HealthReport' }
+              example:
+                status: degraded
+                checkedAt: '2026-11-03T02:22:41.164Z'
+                uptimeSeconds: 17
+                checks:
+                  redis: { status: up, latencyMs: 16 }
+                  temporal: { status: up, latencyMs: 17 }
+                  workers: { status: up, latencyMs: 19, pollers: 1 }
+                  suppliers:
+                    supplierA: { status: up, latencyMs: 11, circuit: closed }
+                    supplierB:
+                      { status: down, latencyMs: 11, error: supplierB returned 500, circuit: closed }
+        '503':
+          description: down
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HealthReport' }
+
+  /health/live:
+    get:
+      tags: [Health]
+      summary: Liveness (the process answers)
+      description: Checks no dependencies, so it stays 200 even when Temporal is down. Used by Docker healthchecks.
+      responses:
+        '200':
+          description: alive
+          content:
+            application/json:
+              schema:
+                type: object
+                properties: { status: { type: string, enum: [alive] } }
+
+  /{supplier}/hotels:
+    servers: &mockServers
+      - url: http://localhost:4000
+        description: Mock suppliers container (Docker)
+      - url: /
+        description: Served by the API (running without Docker)
+    get:
+      tags: [Mock suppliers]
+      summary: A supplier's raw hotels for a city
+      parameters:
+        - $ref: '#/components/parameters/Supplier'
+        - name: city
+          in: query
+          required: true
+          schema: { type: string }
+          example: delhi
+      responses:
+        '200':
+          description: The supplier's hotels (unknown city → empty list).
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/SupplierHotel' }
+        '400': { $ref: '#/components/responses/MockError' }
+        '404': { $ref: '#/components/responses/MockError' }
+        '500':
+          description: The supplier is in `fail` mode.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /{supplier}/_chaos:
+    servers: *mockServers
+    get:
+      tags: [Mock suppliers]
+      summary: Current fault mode
+      parameters:
+        - $ref: '#/components/parameters/Supplier'
+      responses:
+        '200':
+          description: Current mode
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ChaosMode' }
+        '404': { $ref: '#/components/responses/MockError' }
+    post:
+      tags: [Mock suppliers]
+      summary: Break (or fix) a supplier
+      description: |
+        - `ok`: normal
+        - `fail`: answers 500
+        - `slow`: waits 5 s (our supplier timeout is 2 s)
+        - `bad-data`: mixes invalid rows into the answer
+      parameters:
+        - $ref: '#/components/parameters/Supplier'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [mode]
+              properties:
+                mode: { $ref: '#/components/schemas/ChaosModeName' }
+            example: { mode: fail }
+      responses:
+        '200':
+          description: Mode changed
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ChaosMode' }
+        '400': { $ref: '#/components/responses/MockError' }
+        '404': { $ref: '#/components/responses/MockError' }
+
+components:
+  parameters:
+    Supplier:
+      name: supplier
+      in: path
+      required: true
+      schema: { type: string, enum: [supplierA, supplierB] }
+
+  headers:
+    XCache:
+      description: '`MISS` fresh from suppliers · `HIT` from Redis, under 10 min old · `STALE` old copy, suppliers unreachable'
+      schema: { type: string, enum: [MISS, HIT, STALE] }
+    XDataFetchedAt:
+      description: When the suppliers were last asked for this data.
+      schema: { type: string, format: date-time }
+    XDegradedSuppliers:
+      description: Comma-separated suppliers missing from this answer. Absent when all answered.
+      schema: { type: string, example: supplierB }
+    XRequestId:
+      description: Echoes the incoming `x-request-id`, or a new one. Appears in logs and the Temporal workflow memo.
+      schema: { type: string }
+
+  responses:
+    Internal:
+      description: Unexpected error (details only in logs).
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example: { error: { code: INTERNAL, message: internal server error } }
+    MockError:
+      description: Unknown supplier (404), missing city or invalid mode (400).
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+
+  schemas:
+    HotelOffer:
+      type: object
+      required: [name, city, price, commissionPct, supplier]
+      properties:
+        name: { type: string }
+        city: { type: string }
+        price: { type: number }
+        commissionPct: { type: number }
+        supplier: { type: string, enum: [supplierA, supplierB] }
+
+    SupplierHotel:
+      type: object
+      required: [hotelId, name, city, price, commissionPct]
+      properties:
+        hotelId: { type: string }
+        name: { type: string }
+        city: { type: string }
+        price: { type: number }
+        commissionPct: { type: number }
+
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code: { type: string }
+            message: { type: string }
+
+    ChaosModeName:
+      type: string
+      enum: [ok, fail, slow, bad-data]
+
+    ChaosMode:
+      type: object
+      properties:
+        supplier: { type: string, enum: [supplierA, supplierB] }
+        mode: { $ref: '#/components/schemas/ChaosModeName' }
+
+    Check:
+      type: object
+      required: [status, latencyMs]
+      properties:
+        status: { type: string, enum: [up, down] }
+        latencyMs: { type: number }
+        error: { type: string }
+
+    HealthReport:
+      type: object
+      required: [status, checkedAt, uptimeSeconds, checks]
+      properties:
+        status: { type: string, enum: [ok, degraded, down] }
+        checkedAt: { type: string, format: date-time }
+        uptimeSeconds: { type: number }
+        checks:
+          type: object
+          properties:
+            redis: { $ref: '#/components/schemas/Check' }
+            temporal: { $ref: '#/components/schemas/Check' }
+            workers:
+              allOf:
+                - $ref: '#/components/schemas/Check'
+                - type: object
+                  properties: { pollers: { type: integer } }
+            suppliers:
+              type: object
+              additionalProperties:
+                allOf:
+                  - $ref: '#/components/schemas/Check'
+                  - type: object
+                    properties:
+                      circuit: { type: string, enum: [closed, open, unknown] }
+                      retryInMs: { type: number }

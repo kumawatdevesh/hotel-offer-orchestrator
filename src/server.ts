@@ -8,6 +8,7 @@ import { createRedis } from './cache/redis';
 import { config } from './config/env';
 import { logger } from './config/logger';
 import { createOfferOrchestrator } from './orchestration/client';
+import { loadOpenApiSpec } from './routes/docs.routes';
 import { createHealthProbes } from './services/health.probes';
 import { createHealthService } from './services/health.service';
 import { createCircuitBreaker } from './suppliers/circuitBreaker';
@@ -56,6 +57,7 @@ async function main(): Promise<void> {
     }),
     serveMockSuppliers: config.SERVE_MOCK_SUPPLIERS,
     allowChaos: config.NODE_ENV !== 'production',
+    openApiSpec: loadOpenApiSpec(),
   });
 
   const server = app.listen(config.PORT, () => {

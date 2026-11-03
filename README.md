@@ -50,6 +50,7 @@ Wait until every service is healthy (`docker compose ps`), then:
 |---|---|
 | API | http://localhost:3000 |
 | Mock suppliers (+ fault switch) | http://localhost:4000 |
+| API docs (Swagger UI, "Try it out") | http://localhost:3000/docs |
 | Temporal UI (see every workflow run) | http://localhost:8233 |
 
 Stop everything with `docker compose down`.
@@ -431,6 +432,11 @@ Each API copy merges duplicates in its own memory (`inFlight` map); across copie
 
 ## 12. API reference
 
+The full spec is in [`docs/openapi.yaml`](docs/openapi.yaml) (OpenAPI 3.0):
+
+- **Browser:** http://localhost:3000/docs: every endpoint, its parameters, headers and examples, with "Try it out". The mock supplier endpoints there call port 4000, so you can break a supplier from the same page.
+- **Postman / Insomnia:** import `docs/openapi.yaml` (or `http://localhost:3000/docs/openapi.json`) and every request is created for you.
+
 ### `GET /api/hotels`
 
 | Query | Required | Example |
@@ -492,6 +498,7 @@ src/
 
   config/        env.ts (settings checked with zod), logger.ts (pino JSON logs)
   routes/        hotels.routes.ts, health.routes.ts            URL → controller
+                 docs.routes.ts              Swagger UI at /docs
   controllers/   hotels.controller.ts, health.controller.ts    check input, set status + headers
   services/      hotelOffer.service.ts       cache or fresh? fallback? (the decision table)
                  health.service.ts, health.probes.ts   /health rules and checks
@@ -502,6 +509,7 @@ src/
   middleware/    requestContext.ts, asyncHandler.ts, errorHandler.ts
   mocks/         supplierData.ts, supplierRouter.ts     fake suppliers + fault switch
   utils/         withTimeout.ts
+docs/openapi.yaml            API spec, served at /docs
 tests/
   unit/          pure logic and HTTP clients
   integration/   real Redis and a real Temporal test server
@@ -553,7 +561,7 @@ npm test          # all tests (needs Redis on localhost:6379; Temporal tests sta
 npm run check     # typecheck + formatting + tests
 ```
 
-110 tests:
+115 tests:
 
 | File | What it proves |
 |---|---|
@@ -561,6 +569,7 @@ npm run check     # typecheck + formatting + tests
 | `unit/supplierClient` | timeout, 500, 400, bad rows dropped, not-a-list, unreachable |
 | `unit/supplierRouter` | mock data, fault switch modes, switch hidden in production |
 | `unit/config` | defaults, bad values listed together, conflicting TTLs rejected, boolean flags |
+| `unit/docs` | spec is valid OpenAPI and lists every route, /docs serves Swagger UI, looser security headers only on /docs |
 | `unit/health` | status rules, hanging probe times out, report caching, shared probe round, 200/503 |
 | `integration/hotelCache` | atomic save, inclusive range, stale flag, partial eviction → miss, 1,200 hotels |
 | `integration/circuitBreaker` | opens at threshold, trial call, resets, allows calls when Redis is down |
