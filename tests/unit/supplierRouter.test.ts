@@ -53,6 +53,15 @@ describe('mock supplier router', () => {
     expect(res.status).toBe(400);
   });
 
+  it.each(['/supplierZ/hotels?city=delhi', '/supplierZ/_chaos'])(
+    'answers 404 UNKNOWN_SUPPLIER for %s',
+    async (path) => {
+      const res = await request(app()).get(path);
+      expect(res.status).toBe(404);
+      expect(res.body.error.code).toBe('UNKNOWN_SUPPLIER');
+    },
+  );
+
   it('hides the chaos endpoint when not allowed', async () => {
     const res = await request(app(false)).post('/supplierA/_chaos').send({ mode: 'fail' });
     expect(res.status).toBe(404);

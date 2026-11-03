@@ -7,14 +7,15 @@ import { createMockSupplierRouter } from '../../src/mocks/supplierRouter';
 import { fetchSupplierHotels, SupplierError } from '../../src/suppliers/supplierClient';
 
 // A real HTTP server, so timeouts and status codes go through actual fetch.
+// The broken-supplier routes come first: the mock router's /:supplier/hotels would otherwise claim them.
 const app = express()
-  .use(createMockSupplierRouter({ allowChaos: true, slowMs: 300 }))
   .get('/notalist/hotels', (_req, res) => {
     res.json({ oops: 1 });
   })
   .get('/notjson/hotels', (_req, res) => {
     res.type('text').send('<html>gateway error</html>');
-  });
+  })
+  .use(createMockSupplierRouter({ allowChaos: true, slowMs: 300 }));
 
 let server: Server;
 let base: string;
