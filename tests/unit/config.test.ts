@@ -13,6 +13,13 @@ describe('loadConfig', () => {
     expect(loadConfig({ PORT: '8080' }).PORT).toBe(8080);
   });
 
+  it.each([
+    ['true', true],
+    ['false', false],
+  ])('reads SERVE_MOCK_SUPPLIERS=%s as %s', (value, expected) => {
+    expect(loadConfig({ SERVE_MOCK_SUPPLIERS: value }).SERVE_MOCK_SUPPLIERS).toBe(expected);
+  });
+
   it('lists every bad variable in one error', () => {
     expect(() => loadConfig({ PORT: 'abc', REDIS_URL: 'not-a-url' })).toThrow(
       /PORT[\s\S]*REDIS_URL|REDIS_URL[\s\S]*PORT/,

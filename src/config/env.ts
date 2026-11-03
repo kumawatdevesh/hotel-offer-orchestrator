@@ -3,6 +3,8 @@ import { z } from 'zod';
 
 const port = z.coerce.number().int().min(1).max(65_535);
 const positiveInt = z.coerce.number().int().positive();
+// Env vars are strings, and z.coerce.boolean() would turn "false" into true.
+const flag = z.enum(['true', 'false']).transform((v) => v === 'true');
 
 const schema = z
   .object({
@@ -23,6 +25,9 @@ const schema = z
     SUPPLIER_A_URL: z.string().url().default('http://localhost:3000/supplierA'),
     SUPPLIER_B_URL: z.string().url().default('http://localhost:3000/supplierB'),
     SUPPLIER_TIMEOUT_MS: positiveInt.default(2_000),
+    // Mount the mock supplier routes on the API. docker-compose turns this off and runs them
+    // as their own container, so the API only reaches suppliers over the network.
+    SERVE_MOCK_SUPPLIERS: flag.default('true'),
 
     // Data younger than this is served as fresh; older data is only a fallback.
     CACHE_FRESH_TTL_SECONDS: positiveInt.default(600),

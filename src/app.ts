@@ -12,11 +12,19 @@ import { createHotelOfferService, type HotelOfferServiceDeps } from './services/
 
 export interface AppDeps extends HotelOfferServiceDeps {
   health: HealthService;
+  /** Also serve /supplierA and /supplierB from this process (local dev and tests). */
+  serveMockSuppliers: boolean;
   allowChaos: boolean;
 }
 
 /** Wires routes → controllers → services from injected clients; no I/O here, so tests can pass fakes. */
-export function createApp({ cache, orchestrator, health, allowChaos }: AppDeps): Express {
+export function createApp({
+  cache,
+  orchestrator,
+  health,
+  serveMockSuppliers,
+  allowChaos,
+}: AppDeps): Express {
   const hotelsController = createHotelsController(createHotelOfferService({ cache, orchestrator }));
   const healthController = createHealthController(health);
 
@@ -29,9 +37,9 @@ export function createApp({ cache, orchestrator, health, allowChaos }: AppDeps):
 
   app.use('/api', createHotelsRouter(hotelsController));
   app.use(createHealthRouter(healthController));
-  // Mock suppliers share this process for the assignment; the worker still reaches them over HTTP.
+  // Local dev: mock suppliers share this process; the worker still reaches them over HTTP.
   // Mounted last: their /:supplier/... routes would otherwise claim paths meant for the routers above.
-  app.use(createMockSupplierRouter({ allowChaos }));
+  if (serveMockSuppliers) app.use(createMockSupplierRouter({ allowChaos }));
 
   app.use(notFound);
   app.use(errorHandler);

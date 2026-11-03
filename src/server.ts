@@ -54,6 +54,7 @@ async function main(): Promise<void> {
       probeTimeoutMs: config.HEALTH_PROBE_TIMEOUT_MS,
       cacheMs: config.HEALTH_CACHE_MS,
     }),
+    serveMockSuppliers: config.SERVE_MOCK_SUPPLIERS,
     allowChaos: config.NODE_ENV !== 'production',
   });
 

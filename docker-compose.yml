@@ -1,0 +1,104 @@
+# docker compose up --build                             one of each
+# docker compose up --build --scale api=3 --scale worker=3   scaled out
+#
+# Host ports (override if something else already uses them, e.g. API_PORT=3100):
+#   ${API_PORT:-3000}          API, through nginx
+#   ${MOCKS_PORT:-4000}        mock suppliers (+ /_chaos fault switch)
+#   ${TEMPORAL_UI_PORT:-8233}  Temporal web UI
+
+# One image for api, worker and mock-suppliers. Only `api` builds it (three services
+# building the same tag at once race); the others reuse it and never try to pull it.
+x-app: &app
+  image: hotel-offer-orchestrator:local
+  pull_policy: never
+  restart: unless-stopped
+  environment: &app-env
+    NODE_ENV: production
+    LOG_LEVEL: info
+    REDIS_URL: redis://redis:6379
+    TEMPORAL_ADDRESS: temporal:7233
+    SUPPLIER_A_URL: http://mock-suppliers:4000/supplierA
+    SUPPLIER_B_URL: http://mock-suppliers:4000/supplierB
+    SERVE_MOCK_SUPPLIERS: 'false'
+
+services:
+  redis:
+    image: redis:7.4-alpine
+    # A cache, so: cap memory and evict the least-recently-used keys when full.
+    # No persistence: losing it costs one supplier round trip per city.
+    command:
+      - redis-server
+      - --maxmemory
+      - 256mb
+      - --maxmemory-policy
+      - allkeys-lru
+      - --save
+      - ''
+      - --appendonly
+      - 'no'
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 2s
+      timeout: 2s
+      retries: 15
+
+  temporal:
+    # Dev server: one container, in-memory state. A real deployment runs a Temporal
+    # cluster (or Temporal Cloud) with a database; only TEMPORAL_ADDRESS changes.
+    image: temporalio/temporal:1.9.1
+    command: ['server', 'start-dev', '--ip', '0.0.0.0']
+    ports:
+      - '${TEMPORAL_UI_PORT:-8233}:8233'
+    healthcheck:
+      test: ['CMD', 'temporal', 'operator', 'cluster', 'health', '--address', 'localhost:7233']
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  mock-suppliers:
+    <<: *app
+    command: ['node', 'dist/mockSuppliers.js']
+    environment:
+      <<: *app-env
+      PORT: 4000
+    ports:
+      - '${MOCKS_PORT:-4000}:4000'
+    healthcheck: &live-check
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://localhost:'+(process.env.PORT||3000)+'/health/live').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  worker:
+    <<: *app
+    command: ['node', 'dist/worker.js']
+    depends_on:
+      redis: { condition: service_healthy }
+      temporal: { condition: service_healthy }
+      mock-suppliers: { condition: service_healthy }
+
+  api:
+    <<: *app
+    build: .
+    pull_policy: build
+    environment:
+      <<: *app-env
+      PORT: 3000
+    # No host port: nginx is the only way in, so any number of replicas can run.
+    healthcheck: *live-check
+    depends_on:
+      redis: { condition: service_healthy }
+      temporal: { condition: service_healthy }
+
+  nginx:
+    image: nginx:1.27-alpine
+    volumes:
+      - ./deploy/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    ports:
+      - '${API_PORT:-3000}:80'
+    depends_on:
+      api: { condition: service_healthy }

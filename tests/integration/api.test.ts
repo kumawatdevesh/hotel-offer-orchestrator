@@ -45,7 +45,13 @@ const health: HealthService = {
   },
 };
 const app = (c: HotelCache = cache) =>
-  createApp({ cache: c, orchestrator: { fetchOffers }, health, allowChaos: true });
+  createApp({
+    cache: c,
+    orchestrator: { fetchOffers },
+    health,
+    serveMockSuppliers: true,
+    allowChaos: true,
+  });
 
 const names = (body: HotelOffer[]) => body.map((o) => o.name);
 
