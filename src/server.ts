@@ -8,6 +8,9 @@ import { createRedis } from './cache/redis';
 import { config } from './config/env';
 import { logger } from './config/logger';
 import { createOfferOrchestrator } from './orchestration/client';
+import { createHealthProbes } from './services/health.probes';
+import { createHealthService } from './services/health.service';
+import { createCircuitBreaker } from './suppliers/circuitBreaker';
 
 const SHUTDOWN_GRACE_MS = 10_000;
 
@@ -32,6 +35,24 @@ async function main(): Promise<void> {
       taskQueue: config.TEMPORAL_TASK_QUEUE,
       supplierTimeoutMs: config.SUPPLIER_TIMEOUT_MS,
       timeoutMs: config.WORKFLOW_TIMEOUT_MS,
+    }),
+    health: createHealthService({
+      probes: createHealthProbes({
+        redis,
+        temporal: client,
+        namespace: config.TEMPORAL_NAMESPACE,
+        taskQueue: config.TEMPORAL_TASK_QUEUE,
+        // Read-only here: the API only reports circuit state; workers change it.
+        breaker: createCircuitBreaker(redis, {
+          failureThreshold: config.CIRCUIT_FAILURE_THRESHOLD,
+          openMs: config.CIRCUIT_OPEN_SECONDS * 1_000,
+          resetWindowMs: config.CIRCUIT_RESET_WINDOW_SECONDS * 1_000,
+          log: logger,
+        }),
+        supplierTimeoutMs: config.HEALTH_PROBE_TIMEOUT_MS,
+      }),
+      probeTimeoutMs: config.HEALTH_PROBE_TIMEOUT_MS,
+      cacheMs: config.HEALTH_CACHE_MS,
     }),
     allowChaos: config.NODE_ENV !== 'production',
   });

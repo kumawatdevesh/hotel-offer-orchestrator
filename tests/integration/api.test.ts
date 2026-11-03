@@ -6,6 +6,7 @@ import { createHotelCache, type HotelCache } from '../../src/cache/hotelCache';
 import type { HotelOffer } from '../../src/domain/types';
 import { OrchestrationError, type OfferOrchestrator } from '../../src/orchestration/client';
 import type { HotelOffersResult } from '../../src/orchestration/shared';
+import type { HealthService } from '../../src/services/health.service';
 
 // Real Redis, fake orchestrator: the workflow has its own tests; here we test the HTTP decisions.
 const redis = new Redis(process.env.TEST_REDIS_URL ?? 'redis://localhost:6379/15');
@@ -37,8 +38,14 @@ const fresh = (overrides: Partial<HotelOffersResult> = {}): HotelOffersResult =>
 });
 
 const fetchOffers = vi.fn<OfferOrchestrator['fetchOffers']>();
+// /health has its own tests; here it only needs to exist.
+const health: HealthService = {
+  check: async () => {
+    throw new Error('not used in these tests');
+  },
+};
 const app = (c: HotelCache = cache) =>
-  createApp({ cache: c, orchestrator: { fetchOffers }, allowChaos: true });
+  createApp({ cache: c, orchestrator: { fetchOffers }, health, allowChaos: true });
 
 const names = (body: HotelOffer[]) => body.map((o) => o.name);
 

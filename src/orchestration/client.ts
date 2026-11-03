@@ -1,6 +1,7 @@
 import { WorkflowFailedError, type Client } from '@temporalio/client';
 import { ApplicationFailure } from '@temporalio/common';
 import { hotelKey } from '../domain/selectBestOffers';
+import { withTimeout } from '../utils/withTimeout';
 import { ALL_SUPPLIERS_FAILED, type HotelOffersResult } from './shared';
 
 export type OrchestrationFailure = 'ALL_SUPPLIERS_FAILED' | 'TIMEOUT' | 'UNAVAILABLE';
@@ -49,7 +50,11 @@ async function fetchOnce(
   requestId?: string,
 ): Promise<HotelOffersResult> {
   try {
-    return await withTimeout(startAndWait(options, key, requestId), options.timeoutMs, key);
+    return await withTimeout(
+      startAndWait(options, key, requestId),
+      options.timeoutMs,
+      () => new OrchestrationError('TIMEOUT', `no result for ${key} in ${options.timeoutMs}ms`),
+    );
   } catch (err) {
     throw toOrchestrationError(err);
   }
@@ -73,25 +78,6 @@ async function startAndWait(
     ...(requestId && { memo: { requestId } }),
   });
   return (await handle.result()) as HotelOffersResult;
-}
-
-/** Rejects with TIMEOUT if `work` has not settled within `ms`, even when Temporal itself hangs. */
-async function withTimeout<T>(work: Promise<T>, ms: number, key: string): Promise<T> {
-  let timer: NodeJS.Timeout | undefined;
-  const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(
-      () => reject(new OrchestrationError('TIMEOUT', `no result for ${key} in ${ms}ms`)),
-      ms,
-    );
-  });
-
-  try {
-    return await Promise.race([work, timeout]);
-  } finally {
-    clearTimeout(timer);
-    // The losing promise may still reject later; it must not surface as unhandled.
-    work.catch(() => undefined);
-  }
 }
 
 function toOrchestrationError(err: unknown): OrchestrationError {

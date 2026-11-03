@@ -35,6 +35,11 @@ const schema = z
     CIRCUIT_OPEN_SECONDS: positiveInt.default(30),
     // The failure count resets after this long with no new failure.
     CIRCUIT_RESET_WINDOW_SECONDS: positiveInt.default(60),
+
+    // Upper bound for each /health probe (Redis, Temporal, each supplier).
+    HEALTH_PROBE_TIMEOUT_MS: positiveInt.default(1_000),
+    // /health reuses its last report for this long, so monitors can't flood the suppliers.
+    HEALTH_CACHE_MS: positiveInt.default(5_000),
   })
   .refine((c) => c.CACHE_HARD_TTL_SECONDS >= c.CACHE_FRESH_TTL_SECONDS, {
     message: 'CACHE_HARD_TTL_SECONDS must be >= CACHE_FRESH_TTL_SECONDS',
