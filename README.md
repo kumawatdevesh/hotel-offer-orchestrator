@@ -58,6 +58,7 @@ Stop everything with `docker compose down`.
 > **Port already in use?** (e.g. Grafana on 3000) Pick other host ports; nothing else changes:
 > `API_PORT=3100 MOCKS_PORT=4100 TEMPORAL_UI_PORT=8234 docker compose up --build`
 > You can also put these in a `.env` file next to `docker-compose.yml`.
+> (The Swagger page's mock-supplier examples always call port 4000; with another `MOCKS_PORT`, use curl for those.)
 
 ### Without Docker (for development)
 
@@ -162,7 +163,7 @@ curl -X POST localhost:4000/supplierB/_chaos -H 'content-type: application/json'
 
 **One image, three programs.** The `Dockerfile` builds our code once; `api`, `worker` and `mock-suppliers` run the same image with a different command.
 
-**Everything talks over the network, by URL.** The worker reaches suppliers through `SUPPLIER_A_URL=http://mock-suppliers:4000/supplierA`. Pointing it at a real supplier is a config change, not a code change.
+**Everything talks over the network, by URL.** The worker reaches suppliers through `SUPPLIER_A_URL=http://mock-suppliers:4000/supplierA` (the API's `/health` uses the same URLs to probe them). Pointing it at a real supplier is a config change, not a code change.
 
 ---
 
@@ -278,7 +279,7 @@ LRU deletes keys **one at a time**, so it can remove a city's `prices` key and k
 | Both fail, Redis has a copy | 200 with the old data, `x-cache: STALE`, `x-degraded-suppliers: supplierA,supplierB` |
 | Both fail, Redis has nothing | **503** `ALL_SUPPLIERS_UNAVAILABLE` |
 | Redis is down | still works, just without the cache |
-| Temporal is down | same as "both fail" |
+| Temporal is down | same as "both fail", but only after waiting `WORKFLOW_TIMEOUT_MS` (5 s) |
 | Bad input | 400 with a clear message |
 
 ### Timeouts and retries
@@ -350,6 +351,7 @@ Temporal is a separate server that runs a list of steps and makes sure they fini
 ```json
 {
   "status": "degraded",
+  "checkedAt": "2026-11-03T02:22:41.164Z",
   "uptimeSeconds": 17,
   "checks": {
     "redis":    { "status": "up", "latencyMs": 16 },
@@ -597,6 +599,7 @@ npm run check     # typecheck + formatting + tests
 
 ### What I'd add next
 
+- **Fail fast when Temporal is unreachable:** fall back to the cache at once instead of waiting the full 5 s workflow timeout, and report Temporal (not the suppliers) as the problem.
 - **Stale-while-revalidate:** answer a stale price filter immediately and refresh in the background, so no user waits when the 10-minute limit passes.
 - **Exactly one trial call** per supplier when a circuit's open period ends (a short `SET NX` lock).
 - **Metrics:** supplier latency, error rate, cache hit rate, circuit state (Prometheus).
